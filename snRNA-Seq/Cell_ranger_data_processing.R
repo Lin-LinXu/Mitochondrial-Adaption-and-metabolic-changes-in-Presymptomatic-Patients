@@ -151,7 +151,7 @@ DimPlot(liver, split.by = c("Phenotype"), reduction = "tsne", group.by = c("orig
 ################################################################################ scType automatic cell type annotation (using liver samples as examples)
 
 source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/auto_detect_tissue_type.R")
-db_ = "liver_ref_combined.xlsx";
+db_ = "liver.xlsx";
 tissue = "Liver"
 
 # prepare gene sets

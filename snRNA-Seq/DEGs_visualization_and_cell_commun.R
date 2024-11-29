@@ -1,6 +1,6 @@
 # Title: C13 Serine metabolite
 # Project: Mitochondrial Adaption at the Center of Early Metabolic Changes in Presymptomatic Sepsis Patients
-# Maintainer: Lin-Lin Xu
+# Maintainer: Zhengyuan Zhou
 # Last update: Nov 28, 2024
 # License: MIT
 

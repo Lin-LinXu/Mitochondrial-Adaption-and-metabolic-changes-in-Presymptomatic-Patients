@@ -20,7 +20,7 @@ DATE_STR <- format(Sys.time(), "%y%m%d")
 
 FN.meta  <- "rxns_meta.tsv"
 FN.poi <- "poi.txt"
-FN.stats <- "stats.Rdata.zip"
+FN.stats <- "stats.Rdata.zip" # needs to be decompressed first, see passphrase and code below
 FN.passphrase <- "" # paste in passphrase token here to enable unzip | available upon request
 
 SAVE_OUT <- F

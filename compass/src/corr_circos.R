@@ -26,7 +26,7 @@ RES_PATH  <- paste0(PROJ_PATH, "res/")
 DATE_STR <- format(Sys.time(), "%y%m%d")
 
 FN.ws <- "tissue_workspace.RData" # change according to tissue
-FN.corr <- "corr.dat.zip"
+FN.corr <- "corr.dat.zip" # needs to be decompressed first, see passphrase and code below
 FN.passphrase <- "" # paste in passphrase token here to enable unzip | available upon request
 
 FN.poi <- "poi.txt"

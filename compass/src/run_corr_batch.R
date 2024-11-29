@@ -31,7 +31,7 @@ DATE_STR <- format(Sys.time(), "%y%m%d")
 
 FN.poi <- "poi.txt"
 FN.dat <- "reactions_transformed.tsv" # due to size needs to be generated with Compass
-FN.meta <- paste0(TISSUE_STR, "_meta.tsv")
+FN.meta <- paste0(TISSUE_STR, "_meta.tsv") # need to unzip meta.zip first with passphrase
 FN.Recon2.meta <- "rxns_meta.tsv"
 
 # ================================================================ #

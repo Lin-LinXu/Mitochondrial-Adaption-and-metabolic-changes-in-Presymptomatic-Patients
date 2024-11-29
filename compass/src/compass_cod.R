@@ -20,7 +20,8 @@ DATE_STR <- format(Sys.time(), "%y%m%d")
 
 FN.meta  <- "rxns_meta.tsv"
 FN.poi <- "poi.txt"
-FN.stats <- "stats.Rdata"
+FN.stats <- "stats.Rdata.zip"
+FN.passphrase <- "" # paste in passphrase token here to enable unzip | available upon request
 
 SAVE_OUT <- F
 # ================================================================ #
@@ -132,8 +133,11 @@ subs.poi <- read_tsv(paste0(DAT_PATH0, FN.poi), col_names = F) %>% pull()
 
 meta <- read_tsv(paste0(DAT_PATH0, FN.meta))
 
+# unzip stats data
+stopifnot(FN.passphrase != "")
+system(paste0("unzip -P ", FN.passphrase, " ", DAT_PATH, FN.stats, " -d ", DAT_PATH ))
 # load stats data
-load(paste0(DAT_PATH, FN.stats))
+load(paste0(DAT_PATH, FN.stats %>% str_remove(".zip")))
 
 # ================================================================ #
 

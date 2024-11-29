@@ -27,7 +27,7 @@ DATE_STR <- format(Sys.time(), "%y%m%d")
 
 FN.ws <- "tissue_workspace.RData" # change according to tissue
 FN.corr <- "corr.dat.zip"
-# FN.corr.passphrase <- "" # paste in passphrase token here to enable unzip
+FN.passphrase <- "" # paste in passphrase token here to enable unzip | available upon request
 
 FN.poi <- "poi.txt"
 FN.rxns.meta <- "rxns.tsv"
@@ -334,11 +334,12 @@ get_CorrelationCategories <- function(DF) {
 poi <- read_tsv(paste0(DAT_PATH0, FN.poi), col_names = F) %>% pull()
 rxns.meta <- read_tsv(paste0(DAT_PATH0, FN.rxns.meta), col_names = F) %>% rename("rxn_ID" = "X1", "subsystem" = "X2")
 
-# unzip corr data
-stopifnot(FN.corr.passphrase != "")
-system(paste0("unzip -P ", FN.corr.passphrase, " ", DAT_PATH1, FN.corr, " -d ", DAT_PATH1 ))
-FN.corr <- list.files(path = paste0(DAT_PATH1), pattern = "*.tsv")
+# unzip correlation data
+stopifnot(FN.passphrase != "")
+system(paste0("unzip -P ", FN.passphrase, " ", DAT_PATH1, FN.corr, " -d ", DAT_PATH1 ))
 
+# load correlation data
+FN.corr <- list.files(path = paste0(DAT_PATH1), pattern = "*.tsv")
 corr.dat <- list()
 for (i in FN.corr) {
   corr.dat[[i %>% str_extract("^[^_]+")]] <- read_tsv(paste0(DAT_PATH1, i))

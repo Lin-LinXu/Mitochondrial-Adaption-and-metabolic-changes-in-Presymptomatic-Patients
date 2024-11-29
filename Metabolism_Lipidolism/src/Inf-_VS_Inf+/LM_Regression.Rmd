@@ -1,0 +1,243 @@
+# Title: Linear regression Inf- VS Inf+
+# Project: Mitochondrial Adaption at the Center of Early Metabolic Changes in Presymptomatic Sepsis Patients
+# Maintainer: Lin-Lin Xu
+# Last update: Nov 24, 2024
+# License: MIT
+---
+title: "LM_Regression_all_adjust_org"
+output:
+  html_notebook:
+    toc: true
+    toc_float: 
+      collapsed: yes
+      smooth_scroll: yes
+    code_folding: hide
+#knitr::opts_chunk$set(echo = FALSE)
+---
+
+```{r setup, include = FALSE}
+# Load library
+library(tidyverse)
+library('broom')
+library("rlist")
+library("rcompanion")
+library(ggpubr)
+library(stats)
+library(ggridges)
+library(janitor)
+library('RColorBrewer')
+library(ComplexHeatmap)
+library(circlize)
+library(ggprism)
+library(ggrepel)
+library(patchwork)
+set.seed(123)
+```
+
+```{r Function LM Infection VS No Infection, include = FALSE}
+LM_func_Inf <- function(df,meta_df){
+  
+  tmp_df <- df %>%
+    ungroup() %>%
+    mutate(Class1 = reduce2(c('Sepsis', 'Uncomplicated Infection','SIRS.*'),
+                            c('Infection', 'Infection','No Infection'),
+                            .init = df$Class2, str_replace)) %>%
+    mutate(Class1 = factor(Class1,levels = c('No Infection','Infection'))) %>%
+    mutate(Orggroup = reduce2(c('Sepsis', 'Uncomplicated Infection','SIRS-','SIRS\\+'),
+                            c('Org_Dysfunction', 'No_Org_Dysfunction','No_Org_Dysfunction','Org_Dysfunction'),
+                            .init = df$Class2, str_replace)) %>%
+    mutate(Orggroup = factor(Orggroup,levels = c('No_Org_Dysfunction','Org_Dysfunction')))
+    
+  tmp_df1 <- tmp_df %>%
+    left_join(meta_df,by = c(`Sample ID` = "Classifier")) %>%
+    dplyr::select(-`Sample ID`,-Class2) %>%
+    group_by(metabolite) %>%
+    do(tidy(glm(formula = Class1 ~ abundance + Age + Gender + Orggroup,family = "binomial",.))) %>%
+    filter(term %in% "abundance")
+
+  
+  estimate_df <- tibble(metabolite = tmp_df1$metabolite,
+                        estimate = tmp_df1$estimate)
+  
+  pvalue_df <- tibble(metabolite = tmp_df1$metabolite,
+                        p.value = tmp_df1$p.value)
+  
+  statistic_df <- tibble(metabolite = tmp_df1$metabolite,
+                        statistic = tmp_df1$statistic)
+  
+  BHpvalue_df <- pvalue_df %>%
+    mutate_if(is.numeric,funs({. = p.adjust(.,method = "BH")}))
+  
+  Standard_mean_diff <- tmp_df %>%
+    dplyr::select(-`Sample ID`,-Class2,-Orggroup) %>%
+    group_by(metabolite,Class1) %>%
+    summarise(mean = mean(abundance, na.rm = TRUE),sd = sd(abundance, na.rm = TRUE)) %>%
+    pivot_wider(names_from = Class1, values_from = c(mean,sd)) %>%
+    mutate(d = (mean_Infection - `mean_No Infection`))
+
+  
+  return_list <- list(pvalue_df = pvalue_df,BHpvalue_df = BHpvalue_df,estimate_df=estimate_df,statistic_df=statistic_df,
+                      Standard_mean_diff = Standard_mean_diff)
+  return(return_list)
+}
+```
+
+```{r main code, include = FALSE}
+# Tidy data --------------------------------------------------------------------
+Excel_data_list <- readRDS("Compound_data.rds")
+Data_lst <- readRDS("human_data.rds")
+Met_file <- Data_lst$Met_file
+Lip_file <- Data_lst$Lip_file
+Met_ID_info <- Excel_data_list$Metabolite_data_df$compound_info %>%
+  dplyr::select(Name,CompoundID) %>%
+  dplyr::rename(metabolite = CompoundID)
+Lip_ID_info <- Excel_data_list$Lipid_data_df$compound_info %>%
+  dplyr::select(Name,CompoundID) %>%
+  dplyr::rename(metabolite = CompoundID)
+#* meta data -------------------------------------------------------------------
+meta_df <- read_csv2("mata_data1.csv") %>% 
+  dplyr::select(.,-`Day post surgery before sepsis diagnosis or equivalent day post for comparator and SIRS Controls`) %>%
+  distinct(Classifier,Age,Gender, .keep_all = TRUE)
+#* Compound class info ---------------------------------------------------------
+Class_list <- readRDS("Compound_class.rds")
+lipid_prefix <- read_tsv("lipid_class.txt")
+
+Amino_acid_list <- c("Alanine","Arginine","Asparagine","Aspartic acid","Cysteine",
+                     "Glutamine","Glutamic acid","Glycine","Histidine","Isoleucine",
+                     "Leucine","Lysine","Methionine","Phenylalanine","Proline",
+                     "Serine","Threonine","Tryptophan","Tyrosine","Valine"
+                     )
+Amino_acid_in_data <- Met_ID_info %>%
+  filter(Name %in% Amino_acid_list)
+
+Metabolite_class_info <- Class_list$Metabolite_class_df %>%
+  dplyr::select(Compound_ID,class,sub_class) %>%
+  dplyr::rename(Name = "Compound_ID") %>%
+  mutate(sub_class = if_else(Name %in% Amino_acid_in_data$metabolite,"Standard amino acids",sub_class))
+write_tsv(Metabolite_class_info,"metabolite_class_info.tsv")
+
+Lipid_class_info <- Class_list$Lipid_class_df %>%
+  mutate(Prefix = sapply(strsplit(Name," "), `[`, 1)) %>%
+  mutate(Prefix = if_else(Prefix %in% lipid_prefix$Prefix,Prefix,NA_character_)) %>%
+  dplyr::select(CompoundID,LM_category,LM_main_class,Prefix) %>%
+  `colnames<-`(c("Name","class","sub_class","Prefix")) %>%
+  mutate(class = str_remove_all(class," \\[.*?\\]"),
+         sub_class = str_remove_all(sub_class," \\[.*?\\]")) %>%
+  mutate(Prefix = if_else(is.na(Prefix),sub_class,Prefix))
+write_tsv(Lipid_class_info,"Lipid_class_info.tsv")
+# Infection VS No Infection ----------------------------------------------------
+Met_Inf <- LM_func_Inf(Met_file,meta_df)
+Lip_Inf <- LM_func_Inf(Lip_file,meta_df)
+
+Met_tb <- Met_Inf$pvalue_df %>%
+  mutate(SMD = Met_Inf$Standard_mean_diff$d) %>%
+  mutate(p.value = -log(p.value,base = 10))
+Lip_tb <- Lip_Inf$pvalue_df %>%
+  mutate(SMD = Lip_Inf$Standard_mean_diff$d) %>%
+  mutate(p.value = -log(p.value,base = 10))
+
+Sign_Met <- Met_Inf$pvalue_df %>%
+  filter(p.value < 0.05) %>%
+  left_join(Metabolite_class_info,by = c("metabolite" = "Name")) %>%
+  mutate(sub_class = replace_na(sub_class,"undefined")) %>%
+  left_join(Met_ID_info) %>%
+  dplyr::select(.,-class) %>%
+  dplyr::rename(class = sub_class)
+
+class_level <- unique(Sign_Met$class)
+class_level <- c("Standard amino acids","Amino acids, peptides, and analogues",
+                 "Pyridinecarboxylic acids and derivatives","Ureas","undefined")
+
+Sign_Met <- Sign_Met %>%
+  mutate(class = factor(class,levels = class_level)) %>%
+  dplyr::select(.,-p.value) %>%
+  left_join(Met_tb)
+Met_rest <- Met_tb %>%
+  filter(!metabolite %in% Sign_Met$metabolite)
+Sign_Lip <- Lip_Inf$pvalue_df %>%
+  filter(p.value < 0.05) %>%
+  left_join(Lipid_class_info,by = c("metabolite" = "Name")) %>%
+  left_join(Lip_ID_info) %>%
+  dplyr::select(metabolite,Name,p.value,Prefix) %>%
+  dplyr::rename(class = Prefix) %>%
+  dplyr::select(.,-p.value) %>%
+  left_join(Lip_tb) %>%
+  mutate(Name = str_replace_all(Name, c("lysoPC" = "LPC", "lysoPE" = "LPE"))) %>%
+  mutate(class = str_replace_all(class, c("lysoPC" = "LPC", "lysoPE" = "LPE")))
+Lip_rest <- Lip_tb %>%
+  filter(!metabolite %in% Sign_Lip$metabolite)
+## Plot ------------------------------------------------------------------------
+
+volcano_Metabolite_plot <- ggplot() +
+  geom_point(aes(x = SMD, y = p.value),data = Met_rest,alpha = 0.8,color="grey",
+             size = 3) +
+  geom_point(aes(x = SMD, y = p.value,color = class,group = SMD),data = Sign_Met,
+             size = 3,alpha = 0.8) +
+  geom_text_repel(data=Sign_Met,aes(x=SMD, y=p.value,label=Name,group = SMD),
+                  fontface = "bold",
+                  size=4,min.segment.length = 0)+
+  geom_hline(yintercept = -log(0.05,base = 10),linetype = "dashed", color = "grey") +
+  geom_vline(xintercept = 0) +
+  scale_color_manual(values = paletteer::paletteer_d("ggthemes::gdoc")) +
+  labs(title="Metabolites",x="Mean difference. Inf+ vs Inf-",y=expression(bold(-log[10]~"P-value"))) +
+  theme_classic() +
+  theme(
+    # LABELS APPEARANCE
+    legend.position = c(0.03,0.01),
+    legend.justification = c(0.03,0.01),
+    plot.title = element_text(size=16, face= "bold", colour= "black" ),
+    axis.title.x = element_text(size=16,face= "bold",  colour = "black"),    
+    axis.title.y = element_text(size=16, face="bold", colour = "black"),    
+    axis.text.x = element_text(size=16, face="bold", colour = "black"), 
+    axis.text.y = element_text(size=16, face="bold", colour = "black"), # bold
+    strip.text.x = element_text(size = 10, face="bold", colour = "black" ),
+    strip.text.y = element_text(size = 10, face="bold", colour = "black"),
+    axis.line.x = element_line(color="black", size = 1),
+    axis.line.y = element_line(color="black", size = 1),
+    legend.background=element_blank(),
+    legend.text = element_text(size=14, face= "bold"),
+    legend.title = element_text(size=14, face= "bold")
+  )
+volcano_Lipid_plot <- ggplot() +
+  geom_point(aes(x = SMD, y = p.value),data = Lip_rest,alpha = 0.8,color="grey",
+             size = 3) +
+  geom_point(aes(x = SMD, y = p.value,color = class,group = SMD),data = Sign_Lip,
+             size = 3,alpha = 0.8) +
+  geom_text_repel(data=Sign_Lip,aes(x=SMD, y=p.value,label=Name,group = SMD),
+                  fontface = "bold",
+                  size=4,min.segment.length = 0)+
+  geom_hline(yintercept = -log(0.05,base = 10),linetype = "dashed", color = "grey") +
+  geom_vline(xintercept = 0) +
+  scale_color_manual(values = paletteer::paletteer_d("ggthemes::gdoc")) +
+  labs(title="Lipids",x="Mean difference. Inf+ vs Inf-",y=expression(bold(-log[10]~"P-value"))) +
+  theme_classic() +
+  theme(
+    # LABELS APPEARANCE
+    legend.position = c(0.03,0.01),
+    legend.justification = c(0.03,0.01),
+    plot.title = element_text(size=16, face= "bold", colour= "black" ),
+    axis.title.x = element_text(size=16,face= "bold",  colour = "black"),    
+    axis.title.y = element_text(size=16, face="bold", colour = "black"),    
+    axis.text.x = element_text(size=16, face="bold", colour = "black"), 
+    axis.text.y = element_text(size=16, face="bold", colour = "black"), # bold
+    strip.text.x = element_text(size = 10, face="bold", colour = "black" ),
+    strip.text.y = element_text(size = 10, face="bold", colour = "black"),
+    axis.line.x = element_line(color="black", size = 1),
+    axis.line.y = element_line(color="black", size = 1),
+    legend.background=element_blank(),
+    legend.text = element_text(size=14, face= "bold"),
+    legend.title = element_text(size=14, face= "bold")
+  )
+
+P <- volcano_Metabolite_plot + volcano_Lipid_plot
+
+pdf("Fig1_volcano_plot.pdf",width = 16,height = 8)
+P
+dev.off()
+
+Sign_list <- list(
+  metabolite = Sign_Met$metabolite,
+  lipid = Sign_Lip$metabolite
+)
+saveRDS(Sign_list,"Sign_logistic_reg_result.rds")
+```

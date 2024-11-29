@@ -1,0 +1,184 @@
+# Title: Ordinal Regression
+# Project: Mitochondrial Adaption at the Center of Early Metabolic Changes in Presymptomatic Sepsis Patients
+# Maintainer: Lin-Lin Xu
+# Last update: Nov 24, 2024
+# License: MIT
+---
+title: "Sepsis Ordinal Regression adjust"
+output:
+  html_notebook:
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include = FALSE}
+# Load library
+library(tidyverse)
+library(janitor)
+library(ordinal)
+library(patchwork)
+library(RColorBrewer)
+library(broom)
+library('caret')
+library(glmnet)
+library(ggpubr)
+library(venn)
+set.seed(123)
+```
+
+
+```{r Function prop odds test for Ordinal Regression, include = FALSE} 
+# prop odds test
+# see https://stat.ethz.ch/pipermail/r-help/2014-November/423706.html
+test_prop_odds <- function(df) {
+  #
+  # test if the proportional odds assumption holds
+  # 1. create a clm with equal slope and another clm with multiple slopes
+  # 2. anova to test whether a difference exist
+  # Proportional odds assumption holds if p > 0.05
+  #
+  # @param df data frame
+  # @return Chi-Squared p-value of anova
+  #
+  clm_prop_odds <- clm(Class2 ~ abundance + Age + Gender, data=df,link="logit")
+  clm_multi_slope <- clm(Class2 ~ Age + Gender, nominal = ~abundance, data=df,link="logit")
+  p.val <- anova(clm_prop_odds, clm_multi_slope)$`Pr(>Chisq)`[2]
+  return(as.data.frame(p.val))
+}
+```
+
+```{r Function Ordinal Regression, include = FALSE}
+Ordinal_reg <- function(df,vec,meta_df){
+  gradient_vec <- c(paste(vec[1],vec[2],sep = "|"),paste(vec[2],vec[3],sep = "|"))
+  gradient_vec1 <- c(paste(gradient_vec[1],".abundance",sep = ""),
+                     paste(gradient_vec[2],".abundance",sep = "") )
+ 
+  clm_df <- df %>%
+    filter(Class2 %in% vec) %>%
+    mutate(Class2 = factor(Class2,levels = vec)) %>%
+    left_join(meta_df,by = c(`Sample ID` = "Classifier")) %>%
+    mutate(Age = log(Age)) %>%
+    group_by(metabolite) %>% # test for each metabolite separatly
+    do(tidy(clm(Class2 ~ abundance + Age +Gender, link="logit", data = .))) %>% # ordinal regression
+    ungroup() %>%
+    group_by(term) %>%
+    mutate(q.value = p.adjust(p.value, method = "BH")) %>% # p value correction
+    ungroup() %>%
+    filter(term %in% "abundance") 
+  
+significant_clm_cags <- clm_df %>% 
+    mutate(q.value = if_else(p.value < 0.05,q.value,q.value + 1)) %>%
+    filter(q.value < 0.05 ) %>% 
+    pluck("metabolite")
+significant_clm_cags_025 <- clm_df %>% 
+    mutate(q.value = if_else(p.value < 0.05,q.value,q.value + 1)) %>%
+    filter(q.value < 0.25 ) %>% 
+    pluck("metabolite")
+  clm_df <- mutate(clm_df, is_clm_significant_cag = metabolite %in% significant_clm_cags)
+  # Test prop odds
+  prop_odds_passed_cags <- df %>%
+    filter(Class2 %in% vec) %>%
+    mutate(Class2 = factor(Class2,levels = vec)) %>%
+    left_join(meta_df,by = c(`Sample ID` = "Classifier")) %>%
+    group_by(metabolite) %>%
+    do(test_prop_odds(.)) %>%
+    filter(p.val > 0.05) %>% # H0: no diff btw single and multi slope model
+    pluck("metabolite")
+significant_clm_cags_025_tmp <- significant_clm_cags_025
+  signif_assoc_cags <- intersect(prop_odds_passed_cags, significant_clm_cags)
+  signif_assoc_cags_025 <- intersect(prop_odds_passed_cags, significant_clm_cags_025)
+  left_over <- setdiff(significant_clm_cags_025_tmp,signif_assoc_cags_025)
+  clm_df_unpropotional <- df %>%
+    filter(Class2 %in% vec) %>%
+    mutate(Class2 = factor(Class2,levels = vec)) %>%
+    left_join(meta_df,by = c(`Sample ID` = "Classifier")) %>%
+    mutate(Age = log(Age)) %>%
+    filter(!metabolite %in% signif_assoc_cags_025) %>%
+    group_by(metabolite) %>% # test for each metabolite separatly
+    do(tidy(clm(Class2 ~ Age + Gender, nominal = ~abundance, link="logit", data = .))) %>% # ordinal regression
+    ungroup() %>%
+    group_by(term) %>%
+    mutate(q.value = p.adjust(p.value, method = "BH")) %>% # p value correction
+    filter(term %in% gradient_vec1)
+  
+  significant_cags_02_p <- clm_df_unpropotional %>% 
+    dplyr::select(metabolite,term,p.value) %>%
+    group_by(metabolite) %>%
+    mutate(max_value = max(p.value))
+
+  significant_cags_02_BHp <- clm_df_unpropotional %>% 
+    dplyr::select(metabolite,term,p.value) %>%
+    mutate(p.value = p.adjust(p.value, method = "BH")) %>%
+    group_by(metabolite) %>%
+    mutate(max_value = max(p.value))
+  
+  re_df <- data.frame(name = signif_assoc_cags)
+  re_df_025 <- data.frame(name = signif_assoc_cags_025)
+  returnlist <- list(re_df=re_df,re_df_025=re_df_025,clm_df=clm_df,prop_odds_passed_cags = prop_odds_passed_cags)
+  return(returnlist)
+}
+```
+
+```{r main code, include = FALSE}
+# Tidy data --------------------------------------------------------------------
+meta_df <- read_csv2("mata_data1.csv") %>% dplyr::select(.,-`Day post surgery before sepsis diagnosis or equivalent day post for comparator and SIRS Controls`)  %>% distinct(Classifier,Age,Gender, .keep_all = TRUE)
+# Ordinal Regression -----------------------------------------------------------
+#* SIRS- -> Uncomplicated Infection -> Sepsis ----------------------------------
+infection_fac <- c("SIRS-","Uncomplicated Infection","Sepsis")
+color <- c("#0073C2FF","#868686FF","#CD534CFF")
+Excel_data_list <- readRDS("Compound_data.rds")
+Metabolite_new_data <- Excel_data_list$Metabolite_data_df$data_df_mean %>%
+  dplyr::rename(CompoundID = metabolite) %>%
+  left_join(Excel_data_list$Metabolite_data_df$compound_info) %>%
+  filter(Annotation_level %in% c("1","2a","2b")) %>%
+  distinct()
+Lipid_new_data <- Excel_data_list$Lipid_data_df$data_df_mean %>%
+  dplyr::rename(CompoundID = metabolite) %>%
+  left_join(Excel_data_list$Lipid_data_df$compound_info) %>%
+  filter(Annotation_level %in% c("1","2a")) %>%
+  distinct()
+Met_name1 <- read_tsv("Metabolite_name_v1.tsv")
+remove_list1 <- data.frame(name = c("2-Ethoxy-2'-ethyloxanilide","Omeprazole sulphone","Tramadol N-Oxide","Arachidonic acid"))
+remove_list <- read_tsv("remove_human_metabolite.txt")
+Remove_ID1 <- Met_name1 %>%
+  filter(Name %in% remove_list$name) %>%
+  dplyr::select(CompoundID) %>%
+  distinct()
+Remove_ID2 <- Metabolite_new_data %>%
+  filter(Name %in% remove_list1$name) %>%
+  dplyr::select(CompoundID) %>%
+  distinct()
+Remove_IDall <- bind_rows(Remove_ID1,Remove_ID2)
+
+Met_file <- Metabolite_new_data %>%
+  filter(!CompoundID %in% Remove_IDall$CompoundID) %>%
+  dplyr::select(`Sample ID`,Class2,CompoundID,After_subtraction) %>%
+  dplyr::rename(metabolite = CompoundID,abundance = After_subtraction)
+
+Lip_file <- Lipid_new_data %>%
+  dplyr::select(`Sample ID`,Class2,CompoundID,After_subtraction) %>%
+  dplyr::rename(metabolite = CompoundID,abundance = After_subtraction)
+
+
+Met_df <- Met_file 
+Lip_df <- Lip_file 
+Met_Ord <- Ordinal_reg(Met_df,infection_fac,meta_df)
+Lip_Ord <- Ordinal_reg(Lip_df,infection_fac,meta_df)
+
+
+Ordinal_reg_all_result_list_BH <- list(
+  Met_Ord = Met_Ord,
+  Lip_Ord = Lip_Ord
+)
+
+saveRDS(Ordinal_reg_all_result_list_BH,"Ordinal_reg_BH.rds")
+
+
+```
+
+

@@ -1,4 +1,4 @@
-# Title: C13 Serine metabolite
+# Title: DEGs_visualization_and_cell_commun
 # Project: Mitochondrial Adaption at the Center of Early Metabolic Changes in Presymptomatic Sepsis Patients
 # Maintainer: Zhengyuan Zhou
 # Last update: Nov 28, 2024
